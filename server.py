@@ -202,6 +202,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/video-status":
             self._handle_video_status()
             return
+        if self.path == "/compress-prompt":
+            self._handle_compress_prompt()
+            return
         if self.path != "/run-agent":
             self._json(404, {"error": "not found"})
             return
@@ -269,6 +272,61 @@ class Handler(BaseHTTPRequestHandler):
                     if attempt < max_retries - 1:
                         import time
                         time.sleep(3 * (attempt + 1))  # 3s, 6s
+                        continue
+                self._json(e.code, {"error": f"Anthropic API error: {err_body}"})
+                return
+            except Exception as e:
+                self._json(500, {"error": str(e)})
+                return
+
+    def _handle_compress_prompt(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            payload = json.loads(body)
+        except Exception:
+            self._json(400, {"error": "Invalid JSON"})
+            return
+
+        prompt = payload.get("prompt", "").strip()
+        if not prompt:
+            self._json(400, {"error": "prompt required"})
+            return
+        if not API_KEY:
+            self._json(500, {"error": "ANTHROPIC_API_KEY not set"})
+            return
+
+        api_payload = {
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 300,
+            "system": "You are a video prompt specialist for Runway Gen-4.5. Given a detailed visual scene description, extract and rewrite it as a Runway-optimized prompt. Rules: under 900 characters, comma-separated visual descriptors, include: subject, action, setting, lighting, camera style, mood. No markdown. No explanations. Output only the prompt.",
+            "messages": [{"role": "user", "content": prompt}]
+        }
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                req = urllib.request.Request(
+                    "https://api.anthropic.com/v1/messages",
+                    data=json.dumps(api_payload).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-api-key": API_KEY,
+                        "anthropic-version": "2023-06-01"
+                    },
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read())
+                    text = "".join(b.get("text", "") for b in data.get("content", []))
+                    self._json(200, {"prompt": text.strip()})
+                    return
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode()
+                if e.code == 529 or "overloaded" in err_body.lower():
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(3 * (attempt + 1))
                         continue
                 self._json(e.code, {"error": f"Anthropic API error: {err_body}"})
                 return

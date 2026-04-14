@@ -732,10 +732,28 @@ async function generateVideos() {
   // Kick off all generation requests
   for (let i = 0; i < state.videoJobs.length; i++) {
     try {
+      // Compress the raw prompt via Claude before sending to Runway
+      let runwayPrompt = state.videoJobs[i].prompt;
+      try {
+        const cr = await fetch(`${SERVER}/compress-prompt`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: runwayPrompt })
+        });
+        const cd = await cr.json();
+        if (cr.ok && cd.prompt) {
+          runwayPrompt = cd.prompt;
+        } else {
+          runwayPrompt = runwayPrompt.substring(0, 900);
+        }
+      } catch {
+        runwayPrompt = runwayPrompt.substring(0, 900);
+      }
+
       const res = await fetch(`${SERVER}/generate-video`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: state.videoJobs[i].prompt })
+        body: JSON.stringify({ prompt: runwayPrompt })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
