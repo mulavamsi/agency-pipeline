@@ -275,6 +275,6 @@ if __name__ == "__main__":
     print("   Open pipeline.html in your browser to use the pipeline.")
     print("   Press Ctrl+C to stop.\n")
 
-    with socketserver.TCPServer(("", PORT), PipelineHandler) as httpd:
+    with http.server.HTTPServer(("0.0.0.0", PORT), PipelineHandler) as httpd:
         httpd.allow_reuse_address = True
         httpd.serve_forever()
