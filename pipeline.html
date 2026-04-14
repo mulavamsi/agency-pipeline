@@ -242,7 +242,8 @@ let state = {
   reviewingConceptIndex: -1,
   parsedConcepts: [],
   videoJobs: [],
-  videoGenerating: false
+  videoGenerating: false,
+  viewingStage: null
 };
 
 async function checkServer(silent = false) {
@@ -276,17 +277,36 @@ function render() {
 
 function renderStages() {
   document.getElementById('stages').innerHTML = AGENTS.map((a, i) => {
+    const isDone = i < state.stage || state.complete;
     let cls = 'stage';
-    if (i < state.stage || state.complete) cls += ' done';
+    if (isDone) cls += ' done';
     else if (i === state.stage) cls += ' active';
-    const check = (i < state.stage || state.complete) ? '✓ ' : '';
-    return `<div class="${cls}"><span class="stage-num">${i+1}</span>${check}${a.name}</div>`;
+    const check = isDone ? '✓ ' : '';
+    const clickable = isDone ? `onclick="viewStage(${i})" style="cursor:pointer;"` : '';
+    return `<div class="${cls}" ${clickable}><span class="stage-num">${i+1}</span>${check}${a.name}</div>`;
   }).join('');
 }
 
 function renderMain() {
   const s = state;
   let html = '';
+
+  // Viewing a completed stage output
+  if (s.viewingStage !== null) {
+    const vi = s.viewingStage;
+    const va = AGENTS[vi];
+    html = `<div class="card">
+      <div class="card-label">Step ${vi+1} of 6 — completed output</div>
+      <div class="card-title">${va.name}</div>
+      <div class="output">${esc(s.outputs[vi] || '')}</div>
+      <div class="btn-row">
+        <button class="btn-danger" onclick="continueFromStage(${vi})">Continue from here</button>
+        <button onclick="backToCurrent()">Back to current step</button>
+      </div>
+    </div>`;
+    document.getElementById('main').innerHTML = html;
+    return;
+  }
 
   // Never show setup screen while an agent is running or we have outputs
   if (!s.serverOk && !s.loading && !s.outputs.some(Boolean)) {
@@ -666,9 +686,23 @@ function saveEdit() {
 }
 function cancelEdit() { state.editMode = false; render(); }
 function rerun() { state.outputs[state.stage] = null; state.error = null; runAgent(); }
+function viewStage(i) { state.viewingStage = i; render(); }
+function backToCurrent() { state.viewingStage = null; render(); }
+function continueFromStage(i) {
+  state.outputs = state.outputs.slice(0, i + 1);
+  state.stage = i;
+  state.complete = false;
+  state.editMode = false;
+  state.reviewingConcept = false;
+  state.selectedConcept = null;
+  state.reviewingConceptIndex = -1;
+  state.viewingStage = null;
+  state.error = null;
+  render();
+}
 function copyFinal() { navigator.clipboard.writeText(state.outputs[5]||'').then(() => alert('Copied to clipboard!')); }
 function resetAll() {
-  state = { stage:0, inputTab:'paste', brief:'', pdfText:'', pdfName:'', pdfExtracting:false, outputs:[], editMode:false, editContent:'', loading:false, error:null, complete:false, serverOk:state.serverOk, selectedConcept:null, reviewingConcept:false, reviewingConceptIndex:-1, parsedConcepts:[], videoJobs:[], videoGenerating:false };
+  state = { stage:0, inputTab:'paste', brief:'', pdfText:'', pdfName:'', pdfExtracting:false, outputs:[], editMode:false, editContent:'', loading:false, error:null, complete:false, serverOk:state.serverOk, selectedConcept:null, reviewingConcept:false, reviewingConceptIndex:-1, parsedConcepts:[], videoJobs:[], videoGenerating:false, viewingStage:null };
   render();
 }
 
