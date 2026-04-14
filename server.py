@@ -294,7 +294,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         api_payload = {
-            "model": "gen4_turbo",
+            "model": "gen4.5",
             "promptText": prompt,
             "duration": 5,
             "ratio": "1280:720"
