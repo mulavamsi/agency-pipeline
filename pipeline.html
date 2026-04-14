@@ -237,8 +237,9 @@ let state = {
   error: null,
   complete: false,
   serverOk: false,
-  selectingConcept: false,
   selectedConcept: null,
+  reviewingConcept: false,
+  reviewingConceptIndex: -1,
   parsedConcepts: []
 };
 
@@ -285,7 +286,8 @@ function renderMain() {
   const s = state;
   let html = '';
 
-  if (!s.serverOk) {
+  // Never show setup screen while an agent is running or we have outputs
+  if (!s.serverOk && !s.loading && !s.outputs.some(Boolean)) {
     html = `<div class="card">
       <div class="card-label">Setup required</div>
       <div class="card-title">Start the local server first</div>
@@ -380,30 +382,40 @@ function renderMain() {
 
   } else if (s.outputs[s.stage] && !s.editMode) {
 
-    // Special case: after concept ideator, show selection UI
-    if (s.stage === 1 && !s.selectedConcept) {
+    // Special case: after concept ideator — show all concepts + choose buttons
+    if (s.stage === 1 && !s.reviewingConcept) {
       const concepts = parseConcepts(s.outputs[1]);
+      state.parsedConcepts = concepts.map(c => c.full);
       html = `<div class="card">
-        <div class="card-label">Step 2 of 6 — pick your concept</div>
-        <div class="card-title">Choose a concept</div>
-        <div class="card-desc">Select the concept to develop into a full script. Only this concept passes forward.</div>
-        <div class="concept-grid">
-          ${concepts.map((c, i) => `
-            <div class="concept-card ${s.parsedConcepts[i] === s.selectedConcept ? 'selected' : ''}" onclick="selectConcept(${i})">
-              <div class="concept-card-title">${esc(c.title)}</div>
-              <div class="concept-card-logline">${esc(c.logline)}</div>
-              ${c.arc ? `<div class="concept-card-arc">Arc: ${esc(c.arc)}</div>` : ''}
-            </div>
-          `).join('')}
-        </div>
+        <div class="card-label">Step 2 of 6 — choose a concept</div>
+        <div class="card-title">Concept ideator</div>
+        <div class="card-desc">Read all concepts below, then pick one to develop into a full script.</div>
+        <div class="output">${esc(s.outputs[1])}</div>
         ${s.error ? `<div class="flag flag-warn">${esc(s.error)}</div>` : ''}
-        <div class="btn-row">
-          <button class="btn-success" onclick="approveWithConcept()" ${!s.selectedConcept ? 'disabled' : ''}>Use selected concept → Script Writer</button>
-          <button onclick="enterEdit()">Edit full output instead</button>
+        <div class="btn-row" style="flex-wrap:wrap;">
+          ${concepts.map((c, i) => `<button class="btn-primary" onclick="selectConcept(${i})">Choose Concept ${i+1}</button>`).join('')}
+          <button onclick="enterEdit()">Edit output</button>
+          <button onclick="rerun()">Regenerate</button>
         </div>
       </div>`;
-      // Store parsed concepts
-      state.parsedConcepts = concepts.map(c => c.full);
+      document.getElementById('main').innerHTML = html;
+      return;
+    }
+
+    // Concept review: show just the selected concept before passing forward
+    if (s.stage === 1 && s.reviewingConcept) {
+      html = `<div class="card">
+        <div class="card-label">Step 2 of 6 — review selected concept</div>
+        <div class="card-title">Concept ${s.reviewingConceptIndex + 1} selected</div>
+        <div class="card-desc">This is what passes to the Script Writer. Edit if needed.</div>
+        <div class="output">${esc(s.selectedConcept)}</div>
+        ${s.error ? `<div class="flag flag-warn">${esc(s.error)}</div>` : ''}
+        <div class="btn-row">
+          <button class="btn-success" onclick="approveWithConcept()">Approve — send to Script Writer</button>
+          <button onclick="editSelectedConcept()">Edit this concept</button>
+          <button onclick="backToConcepts()">← Back to all concepts</button>
+        </div>
+      </div>`;
       document.getElementById('main').innerHTML = html;
       return;
     }
@@ -554,14 +566,30 @@ function selectConcept(i) {
   const concepts = parseConcepts(state.outputs[1]);
   state.parsedConcepts = concepts.map(c => c.full);
   state.selectedConcept = state.parsedConcepts[i];
+  state.reviewingConcept = true;
+  state.reviewingConceptIndex = i;
+  render();
+}
+
+function backToConcepts() {
+  state.reviewingConcept = false;
+  state.reviewingConceptIndex = -1;
+  state.selectedConcept = null;
+  render();
+}
+
+function editSelectedConcept() {
+  state.editContent = state.selectedConcept;
+  state.editMode = true;
   render();
 }
 
 function approveWithConcept() {
   if (!state.selectedConcept) { state.error = 'Please select a concept first.'; render(); return; }
-  // Replace the concept output with just the selected concept before passing forward
   state.outputs[1] = `SELECTED CONCEPT:\n\n${state.selectedConcept}`;
   state.selectedConcept = null;
+  state.reviewingConcept = false;
+  state.reviewingConceptIndex = -1;
   state.stage++;
   state.editMode = false;
   state.error = null;
@@ -582,12 +610,23 @@ function approve() {
   }
 }
 function enterEdit() { state.editContent = state.outputs[state.stage]; state.editMode = true; render(); }
-function saveEdit() { state.outputs[state.stage] = state.editContent; state.editMode = false; approve(); }
+function saveEdit() {
+  if (state.stage === 1 && state.reviewingConcept !== undefined) {
+    // Editing a selected concept — update selectedConcept and go back to review
+    state.selectedConcept = state.editContent;
+    state.editMode = false;
+    render();
+  } else {
+    state.outputs[state.stage] = state.editContent;
+    state.editMode = false;
+    approve();
+  }
+}
 function cancelEdit() { state.editMode = false; render(); }
 function rerun() { state.outputs[state.stage] = null; state.error = null; runAgent(); }
 function copyFinal() { navigator.clipboard.writeText(state.outputs[5]||'').then(() => alert('Copied to clipboard!')); }
 function resetAll() {
-  state = { stage:0, inputTab:'paste', brief:'', pdfText:'', pdfName:'', pdfExtracting:false, outputs:[], editMode:false, editContent:'', loading:false, error:null, complete:false, serverOk:state.serverOk };
+  state = { stage:0, inputTab:'paste', brief:'', pdfText:'', pdfName:'', pdfExtracting:false, outputs:[], editMode:false, editContent:'', loading:false, error:null, complete:false, serverOk:state.serverOk, selectedConcept:null, reviewingConcept:false, reviewingConceptIndex:-1, parsedConcepts:[] };
   render();
 }
 
