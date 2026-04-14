@@ -242,26 +242,28 @@ let state = {
   parsedConcepts: []
 };
 
-async function checkServer() {
+async function checkServer(silent = false) {
   try {
     const r = await fetch(`${SERVER}/health`, { signal: AbortSignal.timeout(5000) });
     const d = await r.json();
+    const wasOk = state.serverOk;
     state.serverOk = true;
     const dot = document.getElementById('status-dot');
     const txt = document.getElementById('status-text');
-    dot.className = 'dot ok';
-    if (!d.api_key_set) {
-      txt.textContent = 'Server running — API key missing';
-      dot.className = 'dot err';
-    } else {
-      txt.textContent = 'Server connected';
-    }
+    if (dot) dot.className = d.api_key_set ? 'dot ok' : 'dot err';
+    if (txt) txt.textContent = d.api_key_set ? 'Server connected' : 'Server running — API key missing';
+    if (!wasOk) render();
   } catch {
+    const wasOk = state.serverOk;
     state.serverOk = false;
-    document.getElementById('status-dot').className = 'dot err';
-    document.getElementById('status-text').textContent = 'Server not running';
+    if (!silent || wasOk) {
+      const dot = document.getElementById('status-dot');
+      const txt = document.getElementById('status-text');
+      if (dot) dot.className = 'dot err';
+      if (txt) txt.textContent = 'Server not running';
+      if (wasOk) render();
+    }
   }
-  render();
 }
 
 function render() {
@@ -317,6 +319,28 @@ function renderMain() {
   }
 
   const agent = AGENTS[s.stage];
+
+  // Full-card loading state — shown immediately after any button press
+  if (s.loading) {
+    const messages = [
+      'Agents at work…',
+      'Reading the brief…',
+      'Thinking like a strategist…',
+      'Writing the script…',
+      'Designing the sound…',
+      'Building visual prompts…',
+      'Assembling the brief…'
+    ];
+    const msg = messages[Math.min(s.stage, messages.length - 1)];
+    html = `<div class="card" style="text-align:center; padding: 3rem 1.5rem;">
+      <div style="font-size:32px; margin-bottom:1rem;">&#9881;</div>
+      <div class="card-title" style="margin-bottom:8px;">${msg}</div>
+      <div class="card-desc">This takes 15–30 seconds. Hang tight.</div>
+      <div style="margin-top:1.5rem;"><span class="spinner" style="width:18px;height:18px;border-width:3px;"></span></div>
+    </div>`;
+    document.getElementById('main').innerHTML = html;
+    return;
+  }
 
   if (s.stage === 0 && !s.outputs[0]) {
     const isPaste = s.inputTab === 'paste';
@@ -417,7 +441,7 @@ function renderMain() {
       ${s.error ? `<div class="flag flag-warn">${esc(s.error)}</div>` : ''}
       <div class="btn-row">
         <button class="btn-primary" onclick="runAgent()" ${s.loading?'disabled':''}>
-          ${s.loading ? `<span class="spinner"></span>Running ${agent.name}...` : `Run ${agent.name}`}
+          ${s.loading ? `<span class="spinner"></span>Agents at work...` : `Run ${agent.name}`}
         </button>
       </div>
     </div>`;
@@ -545,8 +569,17 @@ function approveWithConcept() {
 }
 
 function approve() {
-  if (state.stage < AGENTS.length - 1) { state.stage++; state.editMode = false; state.error = null; render(); }
-  else { state.complete = true; render(); }
+  if (state.stage < AGENTS.length - 1) {
+    state.stage++;
+    state.editMode = false;
+    state.error = null;
+    state.loading = true;
+    render();
+    runAgent();
+  } else {
+    state.complete = true;
+    render();
+  }
 }
 function enterEdit() { state.editContent = state.outputs[state.stage]; state.editMode = true; render(); }
 function saveEdit() { state.outputs[state.stage] = state.editContent; state.editMode = false; approve(); }
@@ -559,7 +592,7 @@ function resetAll() {
 }
 
 checkServer();
-setInterval(checkServer, 15000);
+setInterval(() => checkServer(true), 15000);
 </script>
 </body>
 </html>
