@@ -540,22 +540,33 @@ async function runAgent() {
 
 function parseConcepts(text) {
   const concepts = [];
-  // Split on CONCEPT [N]: or CONCEPT N:
-  const blocks = text.split(/(?=CONCEPT\s+\[?\d+\]?\s*[:—])/i).filter(b => b.trim());
+  // Match: CONCEPT 1, **CONCEPT 1**, CONCEPT [1], **CONCEPT 1**: Title or **CONCEPT 1: Title**
+  const blocks = text.split(/(?=\*{0,2}CONCEPT\s+\*{0,2}\[?\d+\]?\*{0,2}\s*[:—])/i).filter(b => b.trim());
   for (const block of blocks) {
-    const titleMatch = block.match(/CONCEPT\s+\[?\d+\]?\s*[:—]\s*(.+)/i);
-    const loglineMatch = block.match(/LOGLINE\s*[:—]\s*(.+)/i);
-    const arcMatch = block.match(/EMOTIONAL ARC\s*[:—]\s*(.+)/i);
+    // Strip markdown bold asterisks for matching
+    const clean = block.replace(/\*\*/g, '');
+    const titleMatch = clean.match(/CONCEPT\s+\[?\d+\]?\s*[:—]\s*(.+)/i);
+    const loglineMatch = clean.match(/LOGLINE\s*[:—]\s*(.+)/i);
+    const arcMatch = clean.match(/EMOTIONAL ARC\s*[:—]\s*(.+)/i);
     if (titleMatch) {
       concepts.push({
         title: titleMatch[1].trim(),
-        logline: loglineMatch ? loglineMatch[1].trim() : block.split('\n').slice(1,3).join(' ').trim().substring(0, 120),
+        logline: loglineMatch ? loglineMatch[1].trim() : clean.split('\n').slice(1,3).join(' ').trim().substring(0, 120),
         arc: arcMatch ? arcMatch[1].trim() : '',
         full: block.trim()
       });
     }
   }
-  // Fallback: if parsing fails, show full text as one selectable block
+  // Fallback: if parsing still fails, count numbered concepts manually
+  if (concepts.length === 0) {
+    const matches = [...text.matchAll(/\*{0,2}CONCEPT\s+\*{0,2}\[?(\d+)\]?\*{0,2}\s*[:—]/gi)];
+    for (let i = 0; i < matches.length; i++) {
+      const start = matches[i].index;
+      const end = i + 1 < matches.length ? matches[i+1].index : text.length;
+      const block = text.slice(start, end).trim();
+      concepts.push({ title: `Concept ${matches[i][1]}`, logline: block.substring(0, 150).replace(/\*\*/g,'') + '...', arc: '', full: block });
+    }
+  }
   if (concepts.length === 0) {
     concepts.push({ title: 'Full concept output', logline: text.substring(0, 150) + '...', arc: '', full: text });
   }
