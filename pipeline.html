@@ -240,7 +240,9 @@ let state = {
   selectedConcept: null,
   reviewingConcept: false,
   reviewingConceptIndex: -1,
-  parsedConcepts: []
+  parsedConcepts: [],
+  videoJobs: [],
+  videoGenerating: false
 };
 
 async function checkServer(silent = false) {
@@ -253,7 +255,7 @@ async function checkServer(silent = false) {
     const txt = document.getElementById('status-text');
     if (dot) dot.className = d.api_key_set ? 'dot ok' : 'dot err';
     if (txt) txt.textContent = d.api_key_set ? 'Server connected' : 'Server running — API key missing';
-    if (!wasOk) render();
+    if (!wasOk && !state.loading) render();
   } catch {
     const wasOk = state.serverOk;
     state.serverOk = false;
@@ -262,7 +264,7 @@ async function checkServer(silent = false) {
       const txt = document.getElementById('status-text');
       if (dot) dot.className = 'dot err';
       if (txt) txt.textContent = 'Server not running';
-      if (wasOk) render();
+      if (wasOk && !state.loading) render();
     }
   }
 }
@@ -307,6 +309,34 @@ function renderMain() {
   }
 
   if (s.complete) {
+    let videoHtml = '';
+    if (s.videoJobs.length === 0) {
+      videoHtml = `<div class="btn-row" style="margin-top:1rem;">
+        <button class="btn-primary" onclick="generateVideos()" ${s.videoGenerating?'disabled':''}>
+          ${s.videoGenerating ? '<span class="spinner"></span>Starting generation...' : 'Generate video clips'}
+        </button>
+      </div>`;
+    } else {
+      videoHtml = `<div style="margin-top:1.25rem;">
+        <div class="card-label" style="margin-bottom:10px;">Video clips</div>
+        ${s.videoJobs.map((job, i) => {
+          if (job.url) {
+            return `<div style="margin-bottom:1rem;">
+              <div class="progress-info">Scene ${i+1}: ${esc(job.prompt.substring(0,80))}...</div>
+              <video controls style="width:100%;border-radius:var(--radius-sm);background:#000;margin-top:4px;" src="${esc(job.url)}"></video>
+            </div>`;
+          }
+          if (job.error) {
+            return `<div class="flag flag-warn" style="margin-bottom:8px;">Scene ${i+1} failed: ${esc(job.error)}</div>`;
+          }
+          const pct = job.progress ? Math.round(job.progress * 100) : 0;
+          return `<div style="margin-bottom:8px;" class="flag flag-info">
+            <span class="spinner"></span>Scene ${i+1}: ${job.status || 'PENDING'} ${pct ? pct+'%' : ''}
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
+
     html = `<div class="card">
       <div class="card-label">Pipeline complete</div>
       <div class="card-title">Production brief ready for Indrajeet</div>
@@ -315,6 +345,7 @@ function renderMain() {
         <button class="btn-success" onclick="copyFinal()">Copy full brief</button>
         <button onclick="resetAll()">Start new brief</button>
       </div>
+      ${videoHtml}
     </div>`;
     document.getElementById('main').innerHTML = html;
     return;
@@ -637,8 +668,84 @@ function cancelEdit() { state.editMode = false; render(); }
 function rerun() { state.outputs[state.stage] = null; state.error = null; runAgent(); }
 function copyFinal() { navigator.clipboard.writeText(state.outputs[5]||'').then(() => alert('Copied to clipboard!')); }
 function resetAll() {
-  state = { stage:0, inputTab:'paste', brief:'', pdfText:'', pdfName:'', pdfExtracting:false, outputs:[], editMode:false, editContent:'', loading:false, error:null, complete:false, serverOk:state.serverOk, selectedConcept:null, reviewingConcept:false, reviewingConceptIndex:-1, parsedConcepts:[] };
+  state = { stage:0, inputTab:'paste', brief:'', pdfText:'', pdfName:'', pdfExtracting:false, outputs:[], editMode:false, editContent:'', loading:false, error:null, complete:false, serverOk:state.serverOk, selectedConcept:null, reviewingConcept:false, reviewingConceptIndex:-1, parsedConcepts:[], videoJobs:[], videoGenerating:false };
   render();
+}
+
+function parseVisualPrompts(text) {
+  const prompts = [];
+  // Match PROMPT: ... up to next NEGATIVE PROMPT or SCENE or end
+  const re = /PROMPT:\s*([\s\S]+?)(?=\nNEGATIVE PROMPT:|\nSCENE \[|\nVISUAL CONSISTENCY|\nHANDOFF|$)/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const p = m[1].replace(/\n/g, ' ').trim();
+    if (p) prompts.push(p);
+  }
+  return prompts;
+}
+
+async function generateVideos() {
+  const visualOutput = state.outputs[4] || '';
+  const prompts = parseVisualPrompts(visualOutput);
+  if (!prompts.length) {
+    alert('No visual prompts found in Agent 5 output. Make sure the pipeline has run through the Visual Prompt Writer.');
+    return;
+  }
+  state.videoGenerating = true;
+  state.videoJobs = prompts.map(p => ({ prompt: p, taskId: null, status: 'PENDING', url: null, error: null, progress: 0 }));
+  render();
+
+  // Kick off all generation requests
+  for (let i = 0; i < state.videoJobs.length; i++) {
+    try {
+      const res = await fetch(`${SERVER}/generate-video`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: state.videoJobs[i].prompt })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+      state.videoJobs[i].taskId = data.task_id;
+      state.videoJobs[i].status = 'RUNNING';
+    } catch(e) {
+      state.videoJobs[i].error = e.message;
+      state.videoJobs[i].status = 'FAILED';
+    }
+  }
+  state.videoGenerating = false;
+  render();
+  pollVideoStatus();
+}
+
+function pollVideoStatus() {
+  const pending = state.videoJobs.filter(j => j.taskId && !j.url && !j.error);
+  if (!pending.length) return;
+
+  setTimeout(async () => {
+    for (const job of state.videoJobs) {
+      if (!job.taskId || job.url || job.error) continue;
+      try {
+        const res = await fetch(`${SERVER}/video-status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ task_id: job.taskId })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+        job.status = data.status;
+        job.progress = data.progress || 0;
+        if (data.status === 'SUCCEEDED' && data.url) {
+          job.url = data.url;
+        } else if (data.status === 'FAILED') {
+          job.error = 'Generation failed';
+        }
+      } catch(e) {
+        job.error = e.message;
+      }
+    }
+    render();
+    pollVideoStatus();
+  }, 5000);
 }
 
 checkServer();

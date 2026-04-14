@@ -7,6 +7,7 @@ from pathlib import Path
 
 PORT = int(os.environ.get("PORT", 8765))
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+RUNWAY_API_KEY = os.environ.get("RUNWAY_API_KEY", "")
 
 AGENTS = {
     "brief": """You are the Brief Analyst Agent for a video ad agency.
@@ -195,6 +196,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.path == "/generate-video":
+            self._handle_generate_video()
+            return
+        if self.path == "/video-status":
+            self._handle_video_status()
+            return
         if self.path != "/run-agent":
             self._json(404, {"error": "not found"})
             return
@@ -268,6 +275,90 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json(500, {"error": str(e)})
                 return
+
+    def _handle_generate_video(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            payload = json.loads(body)
+        except Exception:
+            self._json(400, {"error": "Invalid JSON"})
+            return
+
+        prompt = payload.get("prompt", "").strip()
+        if not prompt:
+            self._json(400, {"error": "prompt required"})
+            return
+        if not RUNWAY_API_KEY:
+            self._json(500, {"error": "RUNWAY_API_KEY not set"})
+            return
+
+        api_payload = {
+            "model": "gen4_turbo",
+            "promptText": prompt,
+            "duration": 5,
+            "ratio": "1280:720"
+        }
+        req = urllib.request.Request(
+            "https://api.dev.runwayml.com/v1/text_to_video",
+            data=json.dumps(api_payload).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {RUNWAY_API_KEY}",
+                "X-Runway-Version": "2024-11-06"
+            },
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+                self._json(200, {"task_id": data.get("id")})
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode()
+            self._json(e.code, {"error": f"Runway API error: {err_body}"})
+        except Exception as e:
+            self._json(500, {"error": str(e)})
+
+    def _handle_video_status(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            payload = json.loads(body)
+        except Exception:
+            self._json(400, {"error": "Invalid JSON"})
+            return
+
+        task_id = payload.get("task_id", "").strip()
+        if not task_id:
+            self._json(400, {"error": "task_id required"})
+            return
+        if not RUNWAY_API_KEY:
+            self._json(500, {"error": "RUNWAY_API_KEY not set"})
+            return
+
+        req = urllib.request.Request(
+            f"https://api.dev.runwayml.com/v1/tasks/{task_id}",
+            headers={
+                "Authorization": f"Bearer {RUNWAY_API_KEY}",
+                "X-Runway-Version": "2024-11-06"
+            },
+            method="GET"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+                status = data.get("status", "UNKNOWN")
+                output = data.get("output") or []
+                self._json(200, {
+                    "status": status,
+                    "url": output[0] if output else None,
+                    "progress": data.get("progress", 0)
+                })
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode()
+            self._json(e.code, {"error": f"Runway API error: {err_body}"})
+        except Exception as e:
+            self._json(500, {"error": str(e)})
 
     def _json(self, code, data):
         body = json.dumps(data).encode()
