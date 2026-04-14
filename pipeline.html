@@ -195,7 +195,10 @@
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-const SERVER = 'http://localhost:8765';
+// Auto-detect: if served from Railway (non-localhost), API calls go to same origin
+const SERVER = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? 'http://localhost:8765'
+  : window.location.origin;
 
 const AGENTS = [
   { id: 'brief',      name: 'Brief analyst',          desc: 'Extracts brand, audience, objective, tone, and generates candidate insights' },
@@ -224,7 +227,7 @@ let state = {
 
 async function checkServer() {
   try {
-    const r = await fetch(`${SERVER}/health`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`${SERVER}/health`, { signal: AbortSignal.timeout(5000) });
     const d = await r.json();
     state.serverOk = true;
     const dot = document.getElementById('status-dot');
@@ -239,7 +242,7 @@ async function checkServer() {
   } catch {
     state.serverOk = false;
     document.getElementById('status-dot').className = 'dot err';
-    document.getElementById('status-text').textContent = 'Server not running — see setup';
+    document.getElementById('status-text').textContent = 'Server not running';
   }
   render();
 }
@@ -273,7 +276,7 @@ function renderMain() {
         <strong>1. Set your API key:</strong><br>
         <code>export ANTHROPIC_API_KEY=your-key-here</code><br><br>
         <strong>2. Start the server:</strong><br>
-        <code>python3 server.py</code><br><br>
+        <code>cd ~/Downloads/agency-pipeline && python3 server.py</code><br><br>
         Then refresh this page.
       </div>
       <button onclick="checkServer()">Check again</button>
