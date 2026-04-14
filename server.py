@@ -1,18 +1,11 @@
-#!/usr/bin/env python3
-"""
-Video Ad Agency Pipeline — Local Backend
-Run this on your Mac, then open pipeline.html in your browser.
-"""
-
 import os
 import json
-import http.server
-import socketserver
 import urllib.request
 import urllib.error
-from urllib.parse import urlparse
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
 
-PORT = 8765
+PORT = int(os.environ.get("PORT", 8765))
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 AGENTS = {
@@ -166,37 +159,44 @@ Flag contradictions across upstream outputs. If not production-ready, say so cle
 
 AGENT_ORDER = ["brief", "concept", "script", "sound", "visual", "production"]
 
+HTML_FILE = Path(__file__).parent / "pipeline.html"
 
-class PipelineHandler(http.server.BaseHTTPRequestHandler):
+
+class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         print(f"[{self.address_string()}] {format % args}")
 
-    def send_cors_headers(self):
+    def cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def do_OPTIONS(self):
         self.send_response(200)
-        self.send_cors_headers()
+        self.cors()
         self.end_headers()
 
     def do_GET(self):
-        if self.path == "/health":
-            self.send_response(200)
-            self.send_cors_headers()
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok", "api_key_set": bool(API_KEY)}).encode())
+        if self.path in ("/", "/index.html"):
+            try:
+                html = HTML_FILE.read_bytes()
+                self.send_response(200)
+                self.cors()
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", len(html))
+                self.end_headers()
+                self.wfile.write(html)
+            except FileNotFoundError:
+                self._json(500, {"error": "pipeline.html not found"})
+        elif self.path == "/health":
+            self._json(200, {"status": "ok", "api_key_set": bool(API_KEY)})
         else:
-            self.send_response(404)
-            self.end_headers()
+            self._json(404, {"error": "not found"})
 
     def do_POST(self):
         if self.path != "/run-agent":
-            self.send_response(404)
-            self.end_headers()
+            self._json(404, {"error": "not found"})
             return
 
         length = int(self.headers.get("Content-Length", 0))
@@ -205,27 +205,25 @@ class PipelineHandler(http.server.BaseHTTPRequestHandler):
         try:
             payload = json.loads(body)
         except Exception:
-            self._error(400, "Invalid JSON")
+            self._json(400, {"error": "Invalid JSON"})
             return
 
         agent_id = payload.get("agent")
-        user_content = payload.get("content", "")
+        content = payload.get("content", "")
 
         if agent_id not in AGENTS:
-            self._error(400, f"Unknown agent: {agent_id}")
+            self._json(400, {"error": f"Unknown agent: {agent_id}"})
             return
 
         if not API_KEY:
-            self._error(500, "ANTHROPIC_API_KEY not set. See setup instructions.")
+            self._json(500, {"error": "ANTHROPIC_API_KEY not set"})
             return
-
-        system_prompt = AGENTS[agent_id]
 
         api_payload = {
             "model": "claude-sonnet-4-20250514",
             "max_tokens": 4096,
-            "system": system_prompt,
-            "messages": [{"role": "user", "content": user_content}]
+            "system": AGENTS[agent_id],
+            "messages": [{"role": "user", "content": content}]
         }
 
         req = urllib.request.Request(
@@ -245,36 +243,23 @@ class PipelineHandler(http.server.BaseHTTPRequestHandler):
                 text = "".join(b.get("text", "") for b in data.get("content", []))
                 self._json(200, {"result": text})
         except urllib.error.HTTPError as e:
-            err_body = e.read().decode()
-            self._error(e.code, f"Anthropic API error: {err_body}")
+            self._json(e.code, {"error": f"Anthropic API error: {e.read().decode()}"})
         except Exception as e:
-            self._error(500, str(e))
+            self._json(500, {"error": str(e)})
 
     def _json(self, code, data):
         body = json.dumps(data).encode()
         self.send_response(code)
-        self.send_cors_headers()
+        self.cors()
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
 
-    def _error(self, code, msg):
-        self._json(code, {"error": msg})
-
 
 if __name__ == "__main__":
+    print(f"\n🚀 Pipeline server on http://0.0.0.0:{PORT}")
     if not API_KEY:
-        print("\n⚠️  ANTHROPIC_API_KEY not set.")
-        print("Run: export ANTHROPIC_API_KEY=your-key-here")
-        print("Then restart this server.\n")
-    else:
-        print(f"\n✅ API key found.\n")
-
-    print(f"🚀 Agency Pipeline Server running on http://localhost:{PORT}")
-    print("   Open pipeline.html in your browser to use the pipeline.")
-    print("   Press Ctrl+C to stop.\n")
-
-    with http.server.HTTPServer(("0.0.0.0", PORT), PipelineHandler) as httpd:
-        httpd.allow_reuse_address = True
-        httpd.serve_forever()
+        print("⚠️  ANTHROPIC_API_KEY not set")
+    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    server.serve_forever()
