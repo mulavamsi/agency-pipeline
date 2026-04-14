@@ -299,7 +299,17 @@ class Handler(BaseHTTPRequestHandler):
         api_payload = {
             "model": "claude-sonnet-4-20250514",
             "max_tokens": 300,
-            "system": "You are a video prompt specialist for Runway Gen-4.5. Given a detailed visual scene description, extract and rewrite it as a Runway-optimized prompt. Rules: under 900 characters, comma-separated visual descriptors, include: subject, action, setting, lighting, camera style, mood. No markdown. No explanations. Output only the prompt.",
+            "system": (
+                "You are a video prompt optimizer for Runway Gen-4.5 text-to-video. "
+                "Your ONLY job is to rewrite the given scene description as a Runway prompt.\n\n"
+                "HARD RULES:\n"
+                "- Output MUST be under 200 words and under 800 characters total\n"
+                "- No markdown, no asterisks, no bold, no headers\n"
+                "- Format: comma-separated visual descriptors\n"
+                "- Include only: subject, action, environment, lighting, camera style, mood\n"
+                "- Output the prompt text ONLY — no explanations, no labels, no prefix\n\n"
+                "Count your characters before responding. If over 800 chars, cut until under 800."
+            ),
             "messages": [{"role": "user", "content": prompt}]
         }
 
@@ -319,7 +329,12 @@ class Handler(BaseHTTPRequestHandler):
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     data = json.loads(resp.read())
                     text = "".join(b.get("text", "") for b in data.get("content", []))
-                    self._json(200, {"prompt": text.strip()})
+                    compressed = text.strip()
+                    if len(compressed) > 950:
+                        cut = compressed[:950]
+                        last_comma = cut.rfind(",")
+                        compressed = cut[:last_comma] if last_comma != -1 else cut
+                    self._json(200, {"prompt": compressed})
                     return
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode()
