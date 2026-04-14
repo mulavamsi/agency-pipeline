@@ -304,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
             data=json.dumps(api_payload).encode(),
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {RUNWAY_API_KEY}",
+                "Authorization": f"Bearer {str(RUNWAY_API_KEY).strip()}",
                 "X-Runway-Version": "2024-11-06"
             },
             method="POST"
@@ -339,7 +339,7 @@ class Handler(BaseHTTPRequestHandler):
         req = urllib.request.Request(
             f"https://api.dev.runwayml.com/v1/tasks/{task_id}",
             headers={
-                "Authorization": f"Bearer {RUNWAY_API_KEY}",
+                "Authorization": f"Bearer {str(RUNWAY_API_KEY).strip()}",
                 "X-Runway-Version": "2024-11-06"
             },
             method="GET"
