@@ -237,15 +237,37 @@ class Handler(BaseHTTPRequestHandler):
             method="POST"
         )
 
-        try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                data = json.loads(resp.read())
-                text = "".join(b.get("text", "") for b in data.get("content", []))
-                self._json(200, {"result": text})
-        except urllib.error.HTTPError as e:
-            self._json(e.code, {"error": f"Anthropic API error: {e.read().decode()}"})
-        except Exception as e:
-            self._json(500, {"error": str(e)})
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Rebuild request for each attempt (body stream can only be read once)
+                req = urllib.request.Request(
+                    "https://api.anthropic.com/v1/messages",
+                    data=json.dumps(api_payload).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-api-key": API_KEY,
+                        "anthropic-version": "2023-06-01"
+                    },
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    data = json.loads(resp.read())
+                    text = "".join(b.get("text", "") for b in data.get("content", []))
+                    self._json(200, {"result": text})
+                    return
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode()
+                if e.code == 529 or "overloaded" in err_body.lower():
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(3 * (attempt + 1))  # 3s, 6s
+                        continue
+                self._json(e.code, {"error": f"Anthropic API error: {err_body}"})
+                return
+            except Exception as e:
+                self._json(500, {"error": str(e)})
+                return
 
     def _json(self, code, data):
         body = json.dumps(data).encode()
