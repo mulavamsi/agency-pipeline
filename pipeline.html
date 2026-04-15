@@ -399,19 +399,20 @@ function renderMain() {
       </div>`;
     }
 
+    const lastOutput = esc(state.outputs[state.outputs.length - 1] || '');
     html = `<div class="card">
       <div class="card-label">Pipeline complete</div>
       <div class="card-title">Video generator output</div>
-      <div class="output">${esc(s.outputs[6])}</div>
+      <div class="output">${lastOutput}</div>
       <div class="btn-row">
         <button class="btn-success" onclick="copyFinal()">Copy output</button>
         <button onclick="resetAll()">Start new brief</button>
       </div>
-      <div style="margin-top:1.5rem;">
-        <div class="card-label" style="margin-bottom:10px;">Video frames — edit prompts before generating</div>
-        ${frameRows}
-        ${videoSection}
-      </div>
+    </div>
+    <div class="card">
+      <div class="card-label" style="margin-bottom:10px;">Video frames — edit prompts before generating</div>
+      ${frameRows}
+      ${videoSection}
     </div>`;
     document.getElementById('main').innerHTML = html;
     return;
@@ -749,7 +750,7 @@ function continueFromStage(i) {
   state.framePrompts = [];
   render();
 }
-function copyFinal() { navigator.clipboard.writeText(state.outputs[6]||'').then(() => alert('Copied to clipboard!')); }
+function copyFinal() { navigator.clipboard.writeText(state.outputs[state.outputs.length - 1]||'').then(() => alert('Copied to clipboard!')); }
 function resetAll() {
   state = { stage:0, inputTab:'paste', brief:'', pdfText:'', pdfName:'', pdfExtracting:false, outputs:[], editMode:false, editContent:'', loading:false, error:null, complete:false, serverOk:state.serverOk, selectedConcept:null, reviewingConcept:false, reviewingConceptIndex:-1, parsedConcepts:[], videoJobs:[], videoGenerating:false, viewingStage:null, framePrompts:[] };
   render();
