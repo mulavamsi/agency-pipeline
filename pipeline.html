@@ -352,9 +352,10 @@ function renderMain() {
   }
 
   if (s.complete) {
-    // Populate frame prompts from video_generator output on first render
-    if (s.framePrompts.length === 0 && s.outputs[6]) {
-      state.framePrompts = parseFramePrompts(s.outputs[6]);
+    // Populate frame prompts from the last agent output on first render
+    if (!state.framePrompts || state.framePrompts.length === 0) {
+      const lastOutput = state.outputs[state.outputs.length - 1];
+      if (lastOutput) state.framePrompts = parseFramePrompts(lastOutput);
     }
 
     const activeCount = s.framePrompts.filter(fp => !fp.removed).length;
