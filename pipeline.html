@@ -360,10 +360,11 @@ function renderMain() {
     const activeCount = s.framePrompts.filter(fp => !fp.removed).length;
 
     const frameRows = s.framePrompts.map((fp, i) => fp.removed ? '' : `
-      <div class="frame-row">
+      <div class="frame-row" style="${fp.flagged ? 'border-color:var(--warning);' : ''}">
         <div class="frame-row-header">
           <span class="frame-tag">Frame ${fp.frame}</span>
           <span class="frame-ts">${esc(fp.timestamp)}</span>
+          ${fp.flagged ? '<span style="font-size:11px;color:var(--warning);">&#9888;&#65039; Flagged — review before generating</span>' : ''}
           <button class="btn-danger" style="padding:4px 10px;font-size:11px;" onclick="removeFramePrompt(${i})">Remove</button>
         </div>
         <textarea oninput="updateFramePrompt(${i}, this.value)" id="fpta-${i}">${esc(fp.prompt)}</textarea>
@@ -766,25 +767,43 @@ function parseVisualPrompts(text) {
 
 function parseFramePrompts(text) {
   const results = [];
-  // Primary: match FRAME [N] — timestamp blocks containing FINAL PROMPT:
-  const re = /FRAME\s+\[?(\d+)\]?\s*[—\-]+\s*([^\n]+)\n[\s\S]*?FINAL PROMPT:\s*([\s\S]+?)(?=\nFRAME\s+\[?\d|\nALL PROMPTS|$)/gi;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const prompt = m[3].replace(/\n/g, ' ').trim();
-    if (prompt) results.push({ frame: parseInt(m[1]), timestamp: m[2].trim(), prompt, removed: false });
+  // Match FRAME headers with optional ** bold: **FRAME 1** — or FRAME [1] —
+  const framePattern = /\*{0,2}FRAME\s+\*{0,2}\[?(\d+)\]?\*{0,2}\s*[—\-]+\s*\[?([^\]\n\[]+)\]?/gi;
+  const frameMatches = [...text.matchAll(framePattern)];
+
+  for (let i = 0; i < frameMatches.length; i++) {
+    const frameNum = parseInt(frameMatches[i][1]);
+    const timestamp = frameMatches[i][2].replace(/\*\*/g, '').trim();
+    const blockStart = frameMatches[i].index + frameMatches[i][0].length;
+    const blockEnd = i + 1 < frameMatches.length ? frameMatches[i + 1].index : text.length;
+    const block = text.slice(blockStart, blockEnd);
+
+    // Match FINAL PROMPT: with optional ** — stop at STATUS or next block boundary
+    const promptMatch = block.match(/\*{0,2}FINAL PROMPT\*{0,2}\s*:\s*([\s\S]+?)(?=\n\s*\*{0,2}STATUS|\n\s*\*{0,2}FRAME|\nALL PROMPTS|$)/i);
+    if (!promptMatch) continue;
+    const prompt = promptMatch[1].replace(/\*\*/g, '').replace(/\n/g, ' ').trim();
+
+    // Extract STATUS line to detect flagged frames
+    const statusMatch = block.match(/\*{0,2}STATUS\*{0,2}\s*:\s*(.+)/i);
+    const statusText = statusMatch ? statusMatch[1].replace(/\*\*/g, '').trim() : '';
+    const flagged = /flagged/i.test(statusText);
+
+    if (prompt) results.push({ frame: frameNum, timestamp, prompt, removed: false, flagged });
   }
+
   // Fallback: just FINAL PROMPT: lines without frame context
   if (results.length === 0) {
-    const re2 = /FINAL PROMPT:\s*([\s\S]+?)(?=\nFRAME|\nALL PROMPTS|$)/gi;
-    let n = 1;
+    const re2 = /\*{0,2}FINAL PROMPT\*{0,2}\s*:\s*([\s\S]+?)(?=\n\s*\*{0,2}FRAME|\nALL PROMPTS|$)/gi;
+    let m, n = 1;
     while ((m = re2.exec(text)) !== null) {
-      const prompt = m[1].replace(/\n/g, ' ').trim();
-      if (prompt) results.push({ frame: n++, timestamp: '', prompt, removed: false });
+      const prompt = m[1].replace(/\*\*/g, '').replace(/\n/g, ' ').trim();
+      if (prompt) results.push({ frame: n++, timestamp: '', prompt, removed: false, flagged: false });
     }
   }
+
   // Last resort: fall back to visual prompt parser
   if (results.length === 0) {
-    return parseVisualPrompts(text).map((p, i) => ({ frame: i + 1, timestamp: '', prompt: p, removed: false }));
+    return parseVisualPrompts(text).map((p, i) => ({ frame: i + 1, timestamp: '', prompt: p, removed: false, flagged: false }));
   }
   return results;
 }
