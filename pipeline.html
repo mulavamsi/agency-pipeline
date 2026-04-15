@@ -637,6 +637,7 @@ function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;'
 function setTab(t) { state.inputTab = t; state.error = null; render(); }
 function toggleAutoMode() {
   state.autoMode = !state.autoMode;
+  localStorage.setItem('autoMode', state.autoMode ? '1' : '0');
   const btn = document.getElementById('auto-toggle-btn');
   if (btn) btn.classList.toggle('on', state.autoMode);
 }
@@ -751,6 +752,7 @@ function selectConcept(i) {
   state.reviewingConcept = true;
   state.reviewingConceptIndex = i;
   render();
+  if (state.autoMode) setTimeout(() => approveWithConcept(), 1000);
 }
 
 function backToConcepts() {
@@ -775,7 +777,13 @@ function approveWithConcept() {
   state.stage++;
   state.editMode = false;
   state.error = null;
-  render();
+  if (state.autoMode) {
+    state.loading = true;
+    render();
+    runAgent();
+  } else {
+    render();
+  }
 }
 
 function approve() {
@@ -994,6 +1002,13 @@ function closeAdOverlay() {
   video.src = '';
   overlay.classList.remove('open');
 }
+
+// Restore autoMode from localStorage
+(function() {
+  state.autoMode = localStorage.getItem('autoMode') === '1';
+  const btn = document.getElementById('auto-toggle-btn');
+  if (btn) btn.classList.toggle('on', state.autoMode);
+})();
 
 checkServer();
 setInterval(() => checkServer(true), 15000);
