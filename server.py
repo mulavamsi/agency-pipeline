@@ -236,17 +236,6 @@ class Handler(BaseHTTPRequestHandler):
             "messages": [{"role": "user", "content": content}]
         }
 
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=json.dumps(api_payload).encode(),
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": API_KEY,
-                "anthropic-version": "2023-06-01"
-            },
-            method="POST"
-        )
-
         max_retries = 3
         for attempt in range(max_retries):
             try:

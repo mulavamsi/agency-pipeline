@@ -673,7 +673,7 @@ function approve() {
 }
 function enterEdit() { state.editContent = state.outputs[state.stage]; state.editMode = true; render(); }
 function saveEdit() {
-  if (state.stage === 1 && state.reviewingConcept !== undefined) {
+  if (state.stage === 1 && state.reviewingConcept) {
     // Editing a selected concept — update selectedConcept and go back to review
     state.selectedConcept = state.editContent;
     state.editMode = false;
@@ -698,6 +698,8 @@ function continueFromStage(i) {
   state.reviewingConceptIndex = -1;
   state.viewingStage = null;
   state.error = null;
+  state.videoJobs = [];
+  state.videoGenerating = false;
   render();
 }
 function copyFinal() { navigator.clipboard.writeText(state.outputs[5]||'').then(() => alert('Copied to clipboard!')); }
