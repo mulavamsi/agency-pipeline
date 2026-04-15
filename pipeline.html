@@ -187,6 +187,16 @@
 
   .progress-info { font-size: 12px; color: var(--muted); margin-bottom: 1rem; }
 
+  .auto-toggle {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 11px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    cursor: pointer; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--muted);
+    font-family: inherit; transition: all 0.15s;
+  }
+  .auto-toggle:hover { border-color: var(--muted); color: var(--text); }
+  .auto-toggle.on { border-color: var(--accent); color: var(--accent); background: rgba(212,168,83,0.1); }
+
   .frame-row {
     background: var(--surface2); border: 1px solid var(--border);
     border-radius: var(--radius-sm); padding: 12px; margin-bottom: 8px;
@@ -243,7 +253,10 @@
 <div class="container">
 
   <div class="top-bar">
-    <div class="logo">Video Ad Agency — Pipeline</div>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <div class="logo">Video Ad Agency — Pipeline</div>
+      <button id="auto-toggle-btn" class="auto-toggle" onclick="toggleAutoMode()">&#9889; Auto</button>
+    </div>
     <div class="status-dot">
       <div class="dot" id="status-dot"></div>
       <span id="status-text">Checking server...</span>
@@ -303,7 +316,8 @@ let state = {
   videoJobs: [],
   videoGenerating: false,
   viewingStage: null,
-  framePrompts: []
+  framePrompts: [],
+  autoMode: false
 };
 
 async function checkServer(silent = false) {
@@ -476,11 +490,13 @@ function renderMain() {
       'Reviewing frame prompts...'
     ];
     const msg = messages[Math.min(s.stage, messages.length - 1)];
+    const autoLabel = s.autoMode ? `<div style="margin-top:1rem;font-size:11px;color:var(--accent);letter-spacing:0.06em;">&#9889; AUTO MODE — RUNNING</div>` : '';
     html = `<div class="card" style="text-align:center; padding: 3rem 1.5rem;">
       <div style="font-size:32px; margin-bottom:1rem;">&#9881;</div>
       <div class="card-title" style="margin-bottom:8px;">${msg}</div>
       <div class="card-desc">This takes 15–30 seconds. Hang tight.</div>
       <div style="margin-top:1.5rem;"><span class="spinner" style="width:18px;height:18px;border-width:3px;"></span></div>
+      ${autoLabel}
     </div>`;
     document.getElementById('main').innerHTML = html;
     return;
@@ -619,6 +635,11 @@ function renderMain() {
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function setTab(t) { state.inputTab = t; state.error = null; render(); }
+function toggleAutoMode() {
+  state.autoMode = !state.autoMode;
+  const btn = document.getElementById('auto-toggle-btn');
+  if (btn) btn.classList.toggle('on', state.autoMode);
+}
 
 document.getElementById('pdf-input').addEventListener('change', e => { if(e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; });
 
@@ -672,7 +693,15 @@ async function runAgent() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
     state.outputs[state.stage] = data.result;
-    state.loading = false; render();
+    state.loading = false;
+    // Auto mode: skip approval for all stages except concept (1) and video_generator (last)
+    const isAutoException = state.stage === 1 || state.stage === AGENTS.length - 1;
+    if (state.autoMode && !isAutoException) {
+      render(); // show output briefly
+      setTimeout(() => approve(), 1000);
+    } else {
+      render();
+    }
   } catch(e) {
     state.loading = false;
     state.error = `Error: ${e.message}`;
@@ -796,7 +825,7 @@ function continueFromStage(i) {
 }
 function copyFinal() { navigator.clipboard.writeText(state.outputs[state.outputs.length - 1]||'').then(() => alert('Copied to clipboard!')); }
 function resetAll() {
-  state = { stage:0, inputTab:'paste', brief:'', pdfText:'', pdfName:'', pdfExtracting:false, outputs:[], editMode:false, editContent:'', loading:false, error:null, complete:false, serverOk:state.serverOk, selectedConcept:null, reviewingConcept:false, reviewingConceptIndex:-1, parsedConcepts:[], videoJobs:[], videoGenerating:false, viewingStage:null, framePrompts:[] };
+  state = { stage:0, inputTab:'paste', brief:'', pdfText:'', pdfName:'', pdfExtracting:false, outputs:[], editMode:false, editContent:'', loading:false, error:null, complete:false, serverOk:state.serverOk, selectedConcept:null, reviewingConcept:false, reviewingConceptIndex:-1, parsedConcepts:[], videoJobs:[], videoGenerating:false, viewingStage:null, framePrompts:[], autoMode:false };
   render();
 }
 
