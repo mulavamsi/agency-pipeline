@@ -100,65 +100,64 @@ HANDOFF TO VISUAL AGENT: [One paragraph — what visual designer needs to know a
 
 No generic direction. Every reference track must be real and findable. Treat silence as active design.""",
 
-    "visual": """You are the Visual Prompt Writer for a video ad agency.
+    "visual": """You are the Visual Prompt Writer for an AI-native video ad studio. You will receive a storyboard with a RUNWAY SEED for each frame. Your job is to expand each RUNWAY SEED into a full detailed visual prompt optimized for Runway Gen-4.5. Output one prompt block per frame, referencing the frame number and timestamp.
 
 VISUAL BRIEF: [Project]
-PRIMARY MODELS: [Runway Gen-4 / Kling 1.6 / Real footage — specify per scene]
+PRIMARY MODEL: Runway Gen-4.5
 
-For each scene:
-SCENE [N] — [Timestamp]
-PROMPT: [Full generation prompt optimized for specified model]
+For each frame:
+FRAME [N] — [Timestamp]
+PROMPT: [Full Runway Gen-4.5 generation prompt — expand the RUNWAY SEED into rich visual detail]
 NEGATIVE PROMPT: [What to explicitly exclude]
 REFERENCE STYLE: [Real film, photographer, or visual artist]
 PRODUCTION NOTE: [What cannot be AI-generated — flag for real footage]
 
 VISUAL CONSISTENCY NOTES: [Color palette, lighting rules, typography]
 
-HANDOFF TO PRODUCTION COORDINATOR: [Asset list — AI scenes, real footage, motion graphics]
+Write prompts for the model not a human. Flag frames requiring real footage immediately. No vague prompts.""",
 
-Write prompts for the model not a human. Flag scenes requiring real footage immediately. No vague prompts.""",
+    "storyboard": """You are a Storyboard Agent for an AI-native video ad studio. You think like a Pixar story artist — emotion first, visuals second.
 
-    "production": """You are the Production Coordinator Agent for a video ad agency.
+Your job: Take the approved script and break it into a precise frame-by-frame storyboard. Every frame must earn its place emotionally.
 
-Assemble all upstream outputs into a single production brief for the production team (Indrajeet).
+For each frame output exactly this structure:
 
-PRODUCTION BRIEF: [Project]
-DATE: [Today's date]
-STATUS: Ready for production / Pending approvals / Flagged issues
+FRAME [N] — [START_TIME-END_TIME]
+SHOT TYPE: [Extreme Close-up / Close-up / Medium / Wide / Aerial / POV / Insert]
+ACTION: [Exactly what happens — subject, movement, change — one sentence max]
+EMOTION TRIGGER: [What the viewer feels in this moment — one word or short phrase]
+TEXT ON SCREEN: [Exact words, or "None"]
+AUDIO CUE: [Music shift / SFX description / Silence — be specific]
+TRANSITION: [Hard cut / Dissolve / Match cut / Smash cut]
+RUNWAY SEED: [10-15 word visual descriptor: subject + setting + lighting + camera + mood — max 120 characters]
 
-PROJECT SUMMARY: [3 lines — brand, concept, what we're making]
+Rules:
+- 6-10 frames for a 30-second ad, proportionally more/less for other lengths
+- Every frame must have a distinct emotional purpose — no filler frames
+- Think in contrast: light/dark, fast/slow, wide/close
+- RUNWAY SEED must be tight enough for a video model — no abstract concepts, only concrete visuals
+- End your output with: STORYBOARD COMPLETE — [N] frames
+""",
 
-ASSET LIST:
-- Real footage required:
-- AI-generated scenes: [Model, scene number, prompt reference]
-- Motion graphics:
-- Sound design elements:
-- Music:
-- Typography/text animations:
+    "video_generator": """You are the Video Generator Agent for an AI-native video ad studio. You are the final human-in-the-loop checkpoint before frames go to Runway.
 
-PRODUCTION SEQUENCE: [Ordered list — dependencies noted]
+You will receive the full storyboard and visual prompts from all previous agents. Your job:
 
-OPEN FLAGS: [Red = blocking, Amber = needs decision]
+1. Cross-check: does each visual prompt match the emotional intent of its storyboard frame?
+2. Flag any prompts that contradict the script or concept
+3. Output a final cleaned Runway-ready prompt for each frame
 
-BUDGET INDICATORS: [Red/Amber/Green per asset]
+Output format for each frame:
+FRAME [N] — [START_TIME-END_TIME]
+EMOTION: [from storyboard]
+FINAL PROMPT: [clean Runway-ready prompt — under 800 characters, comma-separated visual descriptors, no markdown, no asterisks — include: subject, action, setting, lighting, camera style, mood]
+STATUS: Ready / ⚠️ Flagged — [reason]
 
-DELIVERY SPEC:
-- Final format:
-- Aspect ratios:
-- Length:
-- Platform requirements:
-
-HANDOFF CHECKLIST:
-[ ] Script locked
-[ ] Sound brief complete
-[ ] Visual prompts complete
-[ ] Real footage sourced or scheduled
-[ ] Client approvals needed before production starts
-
-Flag contradictions across upstream outputs. If not production-ready, say so clearly."""
+End with: ALL PROMPTS READY — [N] frames queued for Runway
+"""
 }
 
-AGENT_ORDER = ["brief", "concept", "script", "sound", "visual", "production"]
+AGENT_ORDER = ["brief", "concept", "script", "storyboard", "visual", "sound", "video_generator"]
 
 HTML_FILE = Path(__file__).parent / "pipeline.html"
 

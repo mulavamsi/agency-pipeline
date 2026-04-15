@@ -186,6 +186,27 @@
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .progress-info { font-size: 12px; color: var(--muted); margin-bottom: 1rem; }
+
+  .frame-row {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 12px; margin-bottom: 8px;
+  }
+  .frame-row-header {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  }
+  .frame-tag {
+    background: rgba(212,168,83,0.15); color: var(--accent);
+    border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600;
+  }
+  .frame-ts { font-size: 11px; color: var(--muted); flex: 1; }
+  .frame-row textarea {
+    width: 100%; min-height: 72px; resize: vertical;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 8px;
+    color: var(--text); font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 12px; line-height: 1.5;
+  }
+  .frame-row textarea:focus { outline: none; border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -215,12 +236,13 @@ const SERVER = (window.location.hostname === 'localhost' || window.location.host
   : window.location.origin;
 
 const AGENTS = [
-  { id: 'brief',      name: 'Brief analyst',          desc: 'Extracts brand, audience, objective, tone, and generates candidate insights' },
-  { id: 'concept',    name: 'Concept ideator',         desc: 'Generates 3-5 ad concepts — approve or edit before passing to script' },
-  { id: 'script',     name: 'Script writer',           desc: 'Full production-ready script, second by second' },
-  { id: 'sound',      name: 'Sound brief writer',      desc: 'Music direction, sound design spec, silence map, sync points' },
-  { id: 'visual',     name: 'Visual prompt writer',    desc: 'AI video/image prompts per scene — Runway, Kling, or real footage' },
-  { id: 'production', name: 'Production coordinator',  desc: 'Final production brief for Indrajeet — flags blocking issues' }
+  { id: 'brief',           name: 'Brief analyst',       desc: 'Extracts brand, audience, objective, tone, and generates candidate insights' },
+  { id: 'concept',         name: 'Concept ideator',     desc: 'Generates 3-5 ad concepts — approve or edit before passing to script' },
+  { id: 'script',          name: 'Script writer',       desc: 'Full production-ready script, second by second' },
+  { id: 'storyboard',      name: 'Storyboard',          desc: 'Frame-by-frame visual breakdown — Pixar-style emotional beats per frame' },
+  { id: 'visual',          name: 'Visual prompt writer', desc: 'One Runway-optimized prompt per frame from the storyboard' },
+  { id: 'sound',           name: 'Sound brief writer',  desc: 'Music direction, sound design spec, silence map, sync points' },
+  { id: 'video_generator', name: 'Video generator',     desc: 'Review and approve frame prompts — then send to Runway' }
 ];
 
 let state = {
@@ -243,7 +265,8 @@ let state = {
   parsedConcepts: [],
   videoJobs: [],
   videoGenerating: false,
-  viewingStage: null
+  viewingStage: null,
+  framePrompts: []
 };
 
 async function checkServer(silent = false) {
@@ -296,7 +319,7 @@ function renderMain() {
     const vi = s.viewingStage;
     const va = AGENTS[vi];
     html = `<div class="card">
-      <div class="card-label">Step ${vi+1} of 6 — completed output</div>
+      <div class="card-label">Step ${vi+1} of ${AGENTS.length} — completed output</div>
       <div class="card-title">${va.name}</div>
       <div class="output">${esc(s.outputs[vi] || '')}</div>
       <div class="btn-row">
@@ -329,29 +352,46 @@ function renderMain() {
   }
 
   if (s.complete) {
-    let videoHtml = '';
+    // Populate frame prompts from video_generator output on first render
+    if (s.framePrompts.length === 0 && s.outputs[6]) {
+      state.framePrompts = parseFramePrompts(s.outputs[6]);
+    }
+
+    const activeCount = s.framePrompts.filter(fp => !fp.removed).length;
+
+    const frameRows = s.framePrompts.map((fp, i) => fp.removed ? '' : `
+      <div class="frame-row">
+        <div class="frame-row-header">
+          <span class="frame-tag">Frame ${fp.frame}</span>
+          <span class="frame-ts">${esc(fp.timestamp)}</span>
+          <button class="btn-danger" style="padding:4px 10px;font-size:11px;" onclick="removeFramePrompt(${i})">Remove</button>
+        </div>
+        <textarea oninput="updateFramePrompt(${i}, this.value)" id="fpta-${i}">${esc(fp.prompt)}</textarea>
+      </div>`).join('');
+
+    let videoSection = '';
     if (s.videoJobs.length === 0) {
-      videoHtml = `<div class="btn-row" style="margin-top:1rem;">
-        <button class="btn-primary" onclick="generateVideos()" ${s.videoGenerating?'disabled':''}>
-          ${s.videoGenerating ? '<span class="spinner"></span>Starting generation...' : 'Generate video clips'}
+      videoSection = `<div class="btn-row" style="margin-top:1rem;">
+        <button class="btn-primary" onclick="generateAllClips()" ${s.videoGenerating||!activeCount?'disabled':''}>
+          ${s.videoGenerating ? '<span class="spinner"></span>Starting generation...' : `&#127916; Generate all clips (${activeCount})`}
         </button>
       </div>`;
     } else {
-      videoHtml = `<div style="margin-top:1.25rem;">
+      videoSection = `<div style="margin-top:1rem;">
         <div class="card-label" style="margin-bottom:10px;">Video clips</div>
-        ${s.videoJobs.map((job, i) => {
+        ${s.videoJobs.map((job, j) => {
           if (job.url) {
             return `<div style="margin-bottom:1rem;">
-              <div class="progress-info">Scene ${i+1}: ${esc(job.prompt.substring(0,80))}...</div>
+              <div class="progress-info">Frame ${job.frame}: ${esc(job.prompt.substring(0,80))}...</div>
               <video controls style="width:100%;border-radius:var(--radius-sm);background:#000;margin-top:4px;" src="${esc(job.url)}"></video>
             </div>`;
           }
           if (job.error) {
-            return `<div class="flag flag-warn" style="margin-bottom:8px;">Scene ${i+1} failed: ${esc(job.error)}</div>`;
+            return `<div class="flag flag-warn" style="margin-bottom:8px;">Frame ${job.frame} failed: ${esc(job.error)}</div>`;
           }
           const pct = job.progress ? Math.round(job.progress * 100) : 0;
-          return `<div style="margin-bottom:8px;" class="flag flag-info">
-            <span class="spinner"></span>Scene ${i+1}: ${job.status || 'PENDING'} ${pct ? pct+'%' : ''}
+          return `<div class="flag flag-info" style="margin-bottom:8px;">
+            <span class="spinner"></span>Frame ${job.frame}: ${job.status || 'PENDING'}${pct ? ' '+pct+'%' : ''}
           </div>`;
         }).join('')}
       </div>`;
@@ -359,13 +399,17 @@ function renderMain() {
 
     html = `<div class="card">
       <div class="card-label">Pipeline complete</div>
-      <div class="card-title">Production brief ready for Indrajeet</div>
-      <div class="output">${esc(s.outputs[5])}</div>
+      <div class="card-title">Video generator output</div>
+      <div class="output">${esc(s.outputs[6])}</div>
       <div class="btn-row">
-        <button class="btn-success" onclick="copyFinal()">Copy full brief</button>
+        <button class="btn-success" onclick="copyFinal()">Copy output</button>
         <button onclick="resetAll()">Start new brief</button>
       </div>
-      ${videoHtml}
+      <div style="margin-top:1.5rem;">
+        <div class="card-label" style="margin-bottom:10px;">Video frames — edit prompts before generating</div>
+        ${frameRows}
+        ${videoSection}
+      </div>
     </div>`;
     document.getElementById('main').innerHTML = html;
     return;
@@ -376,13 +420,13 @@ function renderMain() {
   // Full-card loading state — shown immediately after any button press
   if (s.loading) {
     const messages = [
-      'Agents at work…',
-      'Reading the brief…',
-      'Thinking like a strategist…',
-      'Writing the script…',
-      'Designing the sound…',
-      'Building visual prompts…',
-      'Assembling the brief…'
+      'Analysing the brief...',
+      'Thinking like a strategist...',
+      'Writing the script...',
+      'Building the storyboard...',
+      'Writing visual prompts...',
+      'Designing the sound...',
+      'Reviewing frame prompts...'
     ];
     const msg = messages[Math.min(s.stage, messages.length - 1)];
     html = `<div class="card" style="text-align:center; padding: 3rem 1.5rem;">
@@ -415,7 +459,7 @@ function renderMain() {
     }
 
     html = `<div class="card">
-      <div class="card-label">Step 1 of 6</div>
+      <div class="card-label">Step 1 of ${AGENTS.length}</div>
       <div class="card-title">${agent.name}</div>
       <div class="card-desc">${agent.desc}</div>
       <div class="tabs">
@@ -438,7 +482,7 @@ function renderMain() {
       const concepts = parseConcepts(s.outputs[1]);
       state.parsedConcepts = concepts.map(c => c.full);
       html = `<div class="card">
-        <div class="card-label">Step 2 of 6 — choose a concept</div>
+        <div class="card-label">Step 2 of ${AGENTS.length} — choose a concept</div>
         <div class="card-title">Concept ideator</div>
         <div class="card-desc">Read all concepts below, then pick one to develop into a full script.</div>
         <div class="output">${esc(s.outputs[1])}</div>
@@ -456,7 +500,7 @@ function renderMain() {
     // Concept review: show just the selected concept before passing forward
     if (s.stage === 1 && s.reviewingConcept) {
       html = `<div class="card">
-        <div class="card-label">Step 2 of 6 — review selected concept</div>
+        <div class="card-label">Step 2 of ${AGENTS.length} — review selected concept</div>
         <div class="card-title">Concept ${s.reviewingConceptIndex + 1} selected</div>
         <div class="card-desc">This is what passes to the Script Writer. Edit if needed.</div>
         <div class="output">${esc(s.selectedConcept)}</div>
@@ -472,7 +516,7 @@ function renderMain() {
     }
     // All other stages — standard output view
     html = `<div class="card">
-      <div class="card-label">Step ${s.stage+1} of 6 — output ready</div>
+      <div class="card-label">Step ${s.stage+1} of ${AGENTS.length} — output ready</div>
       <div class="card-title">${agent.name}</div>
       <div class="card-desc">${agent.desc}</div>
       <div class="output">${esc(s.outputs[s.stage])}</div>
@@ -486,7 +530,7 @@ function renderMain() {
 
   } else if (s.editMode) {
     html = `<div class="card">
-      <div class="card-label">Step ${s.stage+1} of 6 — editing output</div>
+      <div class="card-label">Step ${s.stage+1} of ${AGENTS.length} — editing output</div>
       <div class="card-title">Edit ${agent.name} output</div>
       <div class="card-desc">Make changes. This version passes to the next agent.</div>
       <textarea class="edit-area" id="eta">${esc(s.editContent)}</textarea>
@@ -498,7 +542,7 @@ function renderMain() {
 
   } else {
     html = `<div class="card">
-      <div class="card-label">Step ${s.stage+1} of 6</div>
+      <div class="card-label">Step ${s.stage+1} of ${AGENTS.length}</div>
       <div class="card-title">${agent.name}</div>
       <div class="card-desc">${agent.desc}</div>
       ${s.error ? `<div class="flag flag-warn">${esc(s.error)}</div>` : ''}
@@ -700,18 +744,18 @@ function continueFromStage(i) {
   state.error = null;
   state.videoJobs = [];
   state.videoGenerating = false;
+  state.framePrompts = [];
   render();
 }
-function copyFinal() { navigator.clipboard.writeText(state.outputs[5]||'').then(() => alert('Copied to clipboard!')); }
+function copyFinal() { navigator.clipboard.writeText(state.outputs[6]||'').then(() => alert('Copied to clipboard!')); }
 function resetAll() {
-  state = { stage:0, inputTab:'paste', brief:'', pdfText:'', pdfName:'', pdfExtracting:false, outputs:[], editMode:false, editContent:'', loading:false, error:null, complete:false, serverOk:state.serverOk, selectedConcept:null, reviewingConcept:false, reviewingConceptIndex:-1, parsedConcepts:[], videoJobs:[], videoGenerating:false, viewingStage:null };
+  state = { stage:0, inputTab:'paste', brief:'', pdfText:'', pdfName:'', pdfExtracting:false, outputs:[], editMode:false, editContent:'', loading:false, error:null, complete:false, serverOk:state.serverOk, selectedConcept:null, reviewingConcept:false, reviewingConceptIndex:-1, parsedConcepts:[], videoJobs:[], videoGenerating:false, viewingStage:null, framePrompts:[] };
   render();
 }
 
 function parseVisualPrompts(text) {
   const prompts = [];
-  // Match PROMPT: ... up to next NEGATIVE PROMPT or SCENE or end
-  const re = /PROMPT:\s*([\s\S]+?)(?=\nNEGATIVE PROMPT:|\nSCENE \[|\nVISUAL CONSISTENCY|\nHANDOFF|$)/gi;
+  const re = /PROMPT:\s*([\s\S]+?)(?=\nNEGATIVE PROMPT:|\nFRAME \[|\nVISUAL CONSISTENCY|\nHANDOFF|$)/gi;
   let m;
   while ((m = re.exec(text)) !== null) {
     const p = m[1].replace(/\n/g, ' ').trim();
@@ -720,22 +764,44 @@ function parseVisualPrompts(text) {
   return prompts;
 }
 
-async function generateVideos() {
-  const visualOutput = state.outputs[4] || '';
-  const prompts = parseVisualPrompts(visualOutput);
-  if (!prompts.length) {
-    alert('No visual prompts found in Agent 5 output. Make sure the pipeline has run through the Visual Prompt Writer.');
-    return;
+function parseFramePrompts(text) {
+  const results = [];
+  // Primary: match FRAME [N] — timestamp blocks containing FINAL PROMPT:
+  const re = /FRAME\s+\[?(\d+)\]?\s*[—\-]+\s*([^\n]+)\n[\s\S]*?FINAL PROMPT:\s*([\s\S]+?)(?=\nFRAME\s+\[?\d|\nALL PROMPTS|$)/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const prompt = m[3].replace(/\n/g, ' ').trim();
+    if (prompt) results.push({ frame: parseInt(m[1]), timestamp: m[2].trim(), prompt, removed: false });
   }
+  // Fallback: just FINAL PROMPT: lines without frame context
+  if (results.length === 0) {
+    const re2 = /FINAL PROMPT:\s*([\s\S]+?)(?=\nFRAME|\nALL PROMPTS|$)/gi;
+    let n = 1;
+    while ((m = re2.exec(text)) !== null) {
+      const prompt = m[1].replace(/\n/g, ' ').trim();
+      if (prompt) results.push({ frame: n++, timestamp: '', prompt, removed: false });
+    }
+  }
+  // Last resort: fall back to visual prompt parser
+  if (results.length === 0) {
+    return parseVisualPrompts(text).map((p, i) => ({ frame: i + 1, timestamp: '', prompt: p, removed: false }));
+  }
+  return results;
+}
+
+function updateFramePrompt(i, value) { state.framePrompts[i].prompt = value; }
+function removeFramePrompt(i) { state.framePrompts[i].removed = true; render(); }
+
+async function generateAllClips() {
+  const active = state.framePrompts.filter(fp => !fp.removed);
+  if (!active.length) { alert('No frame prompts remaining.'); return; }
   state.videoGenerating = true;
-  state.videoJobs = prompts.map(p => ({ prompt: p, taskId: null, status: 'PENDING', url: null, error: null, progress: 0 }));
+  state.videoJobs = active.map(fp => ({ frame: fp.frame, timestamp: fp.timestamp, prompt: fp.prompt, taskId: null, status: 'PENDING', url: null, error: null, progress: 0 }));
   render();
 
-  // Kick off all generation requests
   for (let i = 0; i < state.videoJobs.length; i++) {
     try {
-      // Compress the raw prompt via Claude before sending to Runway
-      let runwayPrompt = state.videoJobs[i].prompt;
+      let runwayPrompt = state.videoJobs[i].prompt.substring(0, 950);
       try {
         const cr = await fetch(`${SERVER}/compress-prompt`, {
           method: 'POST',
@@ -743,14 +809,9 @@ async function generateVideos() {
           body: JSON.stringify({ prompt: runwayPrompt })
         });
         const cd = await cr.json();
-        if (cr.ok && cd.prompt) {
-          runwayPrompt = cd.prompt;
-        } else {
-          runwayPrompt = runwayPrompt.substring(0, 900);
-        }
-      } catch {
-        runwayPrompt = runwayPrompt.substring(0, 900);
-      }
+        if (cr.ok && cd.prompt) runwayPrompt = cd.prompt;
+      } catch {}
+      runwayPrompt = runwayPrompt.substring(0, 950);
 
       const res = await fetch(`${SERVER}/generate-video`, {
         method: 'POST',
